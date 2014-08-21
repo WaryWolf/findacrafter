@@ -11,6 +11,7 @@ We are stealing character census data from [wow.realmpop.com](http://wow.realmpo
 ### TODO LIST ###
 
 Functionality:
+
 * Save recipe-character data in database
 * Mark characters as dormant/deleted etc
 * Need to figure out what information should be stored in the database - schema review
