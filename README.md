@@ -6,7 +6,11 @@ This is a collection of perl scripts that will hopefully become something great 
 
 Blizzard API documentation is [here](https://github.com/Blizzard/api-wow-docs#character-profile-api)
 
+UPDATE: Blizzard has a new API and website - [dev.battle.net](http://dev.battle.net). Apparently there aren't any new features yet, but you can sign up for an API key and get a higher limit on requests per day.
+
 We are stealing character census data from [wow.realmpop.com](http://wow.realmpop.com/us.html) but any other sources of info would be good
+
+
 
 ### TODO LIST ###
 
