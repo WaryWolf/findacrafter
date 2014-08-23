@@ -27,7 +27,9 @@ Secondary goals:
 
 * add compatibility stuff for other SQL DBs? I'm using postgres for personal preference/it was already installed on this VM.
 
-Speed can probably be improved by running on a dedicated server in the US, closer to the API servers. I will test this out shortly.
+* move functions out into module, fix up bad coding practice, etc.
+
+Database speed can be improved by following this guide - [Tuning your Postgres Server](https://wiki.postgresql.org/wiki/Tuning_Your_PostgreSQL_Server). I was able to get 20k rows inserted per second running on a dedicated server, and about 15k rows/second on a VM at home.
 
 ### How do I get set up? ###
 
