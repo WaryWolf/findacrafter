@@ -5,15 +5,15 @@ drop table guilds;
 
 create table characters (
     char_id SERIAL PRIMARY KEY,
-    name varchar(30) NOT NULL,
-    realm varchar(30) NOT NULL,
+    name TEXT NOT NULL,
+    realm TEXT NOT NULL,
     faction char(1) NOT NULL,
     UNIQUE (name, realm)
     );
 
 create table recipes (
     recipe_id int PRIMARY KEY,
-    name varchar(50) NOT NULL,
+    name TEXT NOT NULL,
     bop boolean NOT NULL
     );
 
@@ -24,8 +24,8 @@ create table char_recipe (
     );
 
 create table guilds (
-    name varchar(30) NOT NULL,
-    realm varchar(30) NOT NULL,
+    name TEXT NOT NULL,
+    realm TEXT NOT NULL,
     PRIMARY KEY (name, realm)
     );
 

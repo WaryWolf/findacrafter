@@ -61,17 +61,23 @@ binmode(STDOUT, ":utf8");
 
 # grab the recipes for a realm
 
+my $sql = "SELECT char_id FROM characters WHERE realm = 'blackwing-lair'";
+my $charcount = $dbh->do($sql);
 
-my $charlist = $dbh->prepare("SELECT name, realm, char_id FROM characters WHERE realm = 'amanthul'");
+print "looking at $charcount chars on 'blackwing-lair'\n";
+
+my $charlist = $dbh->prepare("SELECT name, realm, char_id FROM characters WHERE realm = 'blackwing-lair' LIMIT 100");
 
 $charlist->execute or die $DBI::errstr;
 die $charlist->errstr if ($charlist->err);
 
 my $totalrecipecount;
 my %recipeMap;
+my $chariter = 0;
 while (my ($name, $realm, $charid) = $charlist->fetchrow_array) {
     #my $recipecount = 0;
-    print "grabbing info for $name/$realm\n";
+    print "grabbing info for $name/$realm ($chariter/$charcount)\n";
+    $chariter++;
     my $apireq_url = "$url/$realm/$name?fields=professions";
     my $apireq = HTTP::Request->new(GET => $apireq_url);
     my $apires = $ua->request($apireq);
@@ -101,9 +107,9 @@ while (my ($name, $realm, $charid) = $charlist->fetchrow_array) {
                 }
 =cut
                 if (exists($recipeMap{$recipe})) {
-                    push($recipeMap{$recipe}, $charid);
+                    push(@{$recipeMap{$recipe}}, $charid);
                 } else {
-                 $recipeMap{$recipe} = ($charid);
+                 $recipeMap{$recipe} = [ $charid ];
                 }
                 #$recipecount++;
             }
@@ -113,20 +119,23 @@ while (my ($name, $realm, $charid) = $charlist->fetchrow_array) {
 }
 
 my $count = 0;
+my $total = scalar keys %recipeMap;
 # populate the recipes table
 my $ins_recipe = $dbh->prepare("INSERT INTO recipes (recipe_id, name, bop) VALUES (?, ?, ?)");
 foreach my $spellid (keys %recipeMap) {
     my $spellname = get_spell_name($spellid);
     $ins_recipe->execute($spellid, $spellname, 'true') or die $dbh->errstr;
+    print "getting name for $spellid = $spellname ($count/$total)\n";
     $count++;
 }
 print "inserted $count unique recipes into the db\n";
 $count = 0;
 
+print "inserting char-recipe relations into the db, this may take some time...\n";
 # populate char_recipes table
-my $ins_char = $dbh->prepare("INSERT INTO char_recipes (recipe_id, char_id) VALUES (?, ?)");
+my $ins_char = $dbh->prepare("INSERT INTO char_recipe (recipe_id, char_id) VALUES (?, ?)");
 foreach my $recipe (keys %recipeMap) {
-    foreach my $charid ($recipeMap{$recipe}) {
+    foreach my $charid (@{$recipeMap{$recipe}}) {
         $ins_char->execute($recipe, $charid) or die $dbh->errstr;
         $count++;
     }
