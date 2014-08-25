@@ -59,31 +59,20 @@ $ua->conn_cache($conncache);
 binmode(STDOUT, ":utf8");
 
 
-=for comment
-my $topreq = HTTP::Request->new(GET => 'http://wow.realmpop.com/us.json');
-my $response = $ua->request($topreq);
-die "http aint workin\n" if !$response->is_success;
-my $resdata = $response->content;
-my $json = decode_json($resdata);
-my $jsonrealms = $json->{"realms"};
+# grab the recipes for a realm
 
-foreach my $realm (keys $jsonrealms) {
-    my $realmname = $jsonrealms->{$realm}->{"name"};
-    print "$realm -> $realmname\n";
-}
-=cut
 
-my $charlist = $dbh->prepare("SELECT name, realm FROM characters WHERE realm = 'amanthul' LIMIT 50");
+my $charlist = $dbh->prepare("SELECT name, realm, char_id FROM characters WHERE realm = 'amanthul'");
 
 $charlist->execute or die $DBI::errstr;
 die $charlist->errstr if ($charlist->err);
 
 my $totalrecipecount;
 my %recipeMap;
-while (my ($name, $realm) = $charlist->fetchrow_array) {
-    my $recipecount = 0;
+while (my ($name, $realm, $charid) = $charlist->fetchrow_array) {
+    #my $recipecount = 0;
     print "grabbing info for $name/$realm\n";
-    my $apireq_url = "$url/$realm/$name?fields=professions,guild";
+    my $apireq_url = "$url/$realm/$name?fields=professions";
     my $apireq = HTTP::Request->new(GET => $apireq_url);
     my $apires = $ua->request($apireq);
     next if $apires->code != 200;
@@ -104,26 +93,58 @@ while (my ($name, $realm) = $charlist->fetchrow_array) {
         my $profName = $prof->[0]->{'name'};
         if (grep(/^$profName$/,@craftingprofs)) {
             foreach my $recipe (@{$prof->[0]->{'recipes'}}) {
+=for comment
                 if (exists($recipeMap{$recipe})) {
                     $recipeMap{$recipe} += 1;
                 } else {
                     $recipeMap{$recipe} = 1;
                 }
-                $recipecount++;
+=cut
+                if (exists($recipeMap{$recipe})) {
+                    push($recipeMap{$recipe}, $charid);
+                } else {
+                 $recipeMap{$recipe} = ($charid);
+                }
+                #$recipecount++;
             }
         }
     }
-    $totalrecipecount += $recipecount;
-    #print Dumper($apijson);
-    #die "successfully got $apireq_url\n";
+    #$totalrecipecount += $recipecount;
 }
-while (my ($key, $value) = each %recipeMap) {
-    print "saw $key $value times\n";
-}
-my $uniques = scalar keys %recipeMap;
-print "found $uniques recipes\n";
 
-#$dbh->commit;
+my $count = 0;
+# populate the recipes table
+my $ins_recipe = $dbh->prepare("INSERT INTO recipes (recipe_id, name, bop) VALUES (?, ?, ?)");
+foreach my $spellid (keys %recipeMap) {
+    my $spellname = get_spell_name($spellid);
+    $ins_recipe->execute($spellid, $spellname, 'true') or die $dbh->errstr;
+    $count++;
+}
+print "inserted $count unique recipes into the db\n";
+$count = 0;
+
+# populate char_recipes table
+my $ins_char = $dbh->prepare("INSERT INTO char_recipes (recipe_id, char_id) VALUES (?, ?)");
+foreach my $recipe (keys %recipeMap) {
+    foreach my $charid ($recipeMap{$recipe}) {
+        $ins_char->execute($recipe, $charid) or die $dbh->errstr;
+        $count++;
+    }
+}
+print "inserted $count recipe-char relationships into the db\n";
+
+
+
+#while (my ($key, $value) = each %recipeMap) {
+#    print "saw $key $value times\n";
+#}
+#my $uniques = scalar keys %recipeMap;
+#print "found $uniques recipes\n";
+
+
+
+
+$dbh->commit;
 $dbh->disconnect;
 
 # PROGRAM ENDS HERE, FUNCTIONS BELOW
@@ -136,6 +157,20 @@ sub addrecipes {
     my ($name, $realm, @recipes) = @_;
     #my $ins = $dbh->prepare("INSERT INTO 
 
+}
+
+
+sub get_spell_name {
+    
+    my ($spellid) = @_;
+
+    my $url = "http://us.battle.net/api/wow/spell/$spellid";
+    my $req = HTTP::Request->new(GET => $url);
+    my $res = $ua->request($req);
+    die "grabbing $url failed: ",$res->code,"\n" if !$res->is_success;
+    my $json = decode_json($res->content);
+    die "bad request at $url: $json->{'status'}\n" if exists($json->{'status'});
+    return $json->{'name'} or die "spell name for $spellid not found\n";
 }
 
 

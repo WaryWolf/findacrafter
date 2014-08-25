@@ -66,7 +66,6 @@ printf("processed realmlist in %.2f seconds\n", $newtime - $starttime);
 # grab each realm's json data from realmpop site and save it to the disk
 my $realmcount = scalar keys $jsonrealms;
 my $realmno = 0;
-=for comment
 foreach my $realm (keys $jsonrealms) {
     my $realmreq = HTTP::Request->new(GET => $url . 'us-' . $realm . '.json');    
     my $realmres = $ua->request($realmreq);
@@ -88,7 +87,6 @@ foreach my $realm (keys $jsonrealms) {
 }
 $newtime = Time::HiRes::gettimeofday();
 printf("finished downloading realms in %.2f seconds\n", $newtime - $starttime);
-=cut
 
 
 
