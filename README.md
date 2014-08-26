@@ -10,7 +10,7 @@ UPDATE: Blizzard has a new API and website - [dev.battle.net](http://dev.battle.
 
 We are stealing character census data from [wow.realmpop.com](http://wow.realmpop.com/us.html) but any other sources of info would be good
 
-
+Look at table partitioning in postgres - thanks aidan - http://www.postgresql.org/docs/9.1/static/ddl-partitioning.html
 
 ### TODO LIST ###
 
