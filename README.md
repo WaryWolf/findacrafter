@@ -31,6 +31,8 @@ Secondary goals:
 
 Database speed can be improved by following this guide - [Tuning your Postgres Server](https://wiki.postgresql.org/wiki/Tuning_Your_PostgreSQL_Server). I was able to get 20k rows inserted per second running on a dedicated server, and about 15k rows/second on a VM at home.
 
+"The character and guild API resources do honor HTTP requests that contain the "If-Modified-Since" header." <- put a last-checked timestamp in characters table and use that for requests to save on processing time (and be nice to the api, whom we love so much)
+
 ### How do I get set up? ###
 
 * Install perl, any perl dependencies, and postgresql
