@@ -59,101 +59,119 @@ $ua->conn_cache($conncache);
 binmode(STDOUT, ":utf8");
 
 
-# grab the recipes for a realm
+my $realmlist =  $dbh->selectall_hashref("SELECT DISTINCT(realm) FROM characters", "realm");
 
-my $sql = "SELECT char_id FROM characters WHERE realm = 'blackwing-lair'";
-my $charcount = $dbh->do($sql);
 
-print "looking at $charcount chars on 'blackwing-lair'\n";
+foreach my $realm (keys %{$realmlist}) {
 
-my $charlist = $dbh->prepare("SELECT name, realm, char_id FROM characters WHERE realm = 'blackwing-lair' LIMIT 100");
 
-$charlist->execute or die $DBI::errstr;
-die $charlist->errstr if ($charlist->err);
+    # grab already known recipes
+    my $known = $dbh->selectall_hashref("SELECT recipe_id FROM recipes", "recipe_id");
 
-my $totalrecipecount;
-my %recipeMap;
-my $chariter = 0;
-while (my ($name, $realm, $charid) = $charlist->fetchrow_array) {
-    #my $recipecount = 0;
-    print "grabbing info for $name/$realm ($chariter/$charcount)\n";
-    $chariter++;
-    my $apireq_url = "$url/$realm/$name?fields=professions";
-    my $apireq = HTTP::Request->new(GET => $apireq_url);
-    my $apires = $ua->request($apireq);
-    next if $apires->code != 200;
-    #die "grabbing $apireq_url failed: ",$apires->code,"\n" if !$apires->is_success;
-    if ((length($apires->content) < 5) or ($apires->code == 404)) {
-        #print "got a bad response, skipping $name\n";
-        # delete the char here or something
-        next;
-    }
-    my $apijson = decode_json($apires->content);
-    print "$name is still bad\n" if exists($apijson->{"status"});
-    #print "$name $realm\n";
-    
-    foreach my $prof ($apijson->{'professions'}->{'primary'}) {
-        #print Dumper($prof->[0]);
-        #die;
-        next if !exists($prof->[0]->{'name'});
-        my $profName = $prof->[0]->{'name'};
-        if (grep(/^$profName$/,@craftingprofs)) {
-            foreach my $recipe (@{$prof->[0]->{'recipes'}}) {
-=for comment
-                if (exists($recipeMap{$recipe})) {
-                    $recipeMap{$recipe} += 1;
-                } else {
-                    $recipeMap{$recipe} = 1;
+    my $sql = "SELECT char_id FROM characters WHERE realm = '$realm'";
+    my $charcount = $dbh->do($sql);
+
+    print "looking at $charcount chars on '$realm'\n";
+
+    my $charlist = $dbh->prepare("SELECT name, realm, char_id FROM characters WHERE realm = '$realm' limit 100");
+
+    $charlist->execute or die $dbh->errstr;
+    die $charlist->errstr if ($charlist->err);
+
+    my %recipeMap;
+    my $chariter = 0;
+    my %timestamps;
+    my @oldchars;
+    my @noncrafters;
+    my $profcount;
+
+    while (my ($name, $realm, $charid) = $charlist->fetchrow_array) {
+        print "grabbing info for $name/$realm ($chariter/$charcount)\n";
+        $chariter++;
+        my $apireq_url = "$url/$realm/$name?fields=professions,feed";
+        my $apireq = HTTP::Request->new(GET => $apireq_url);
+        my $apires = $ua->request($apireq);
+        if ($apires->code != 200) {
+            push(@oldchars,$charid);
+            next;
+        }
+        if ((length($apires->content) < 5) or ($apires->code == 404)) {
+            #print "got a bad response, skipping $name\n";
+            # delete the char here or something
+            push(@oldchars,$charid);
+            next;
+        }
+        my $apijson = decode_json($apires->content);
+        print "$name is still bad\n" if exists($apijson->{"status"});
+        $profcount = 0;
+        foreach my $prof ($apijson->{'professions'}->{'primary'}) {
+            #print Dumper($prof->[0]);
+            #die;
+            next if !exists($prof->[0]->{'name'});
+            my $profName = $prof->[0]->{'name'};
+            if (grep(/^$profName$/,@craftingprofs)) {
+                $profcount++;
+                foreach my $recipe (@{$prof->[0]->{'recipes'}}) {
+                    if (exists($recipeMap{$recipe})) {
+                        push(@{$recipeMap{$recipe}}, $charid);
+                    } else {
+                     $recipeMap{$recipe} = [ $charid ];
+                    }
                 }
-=cut
-                if (exists($recipeMap{$recipe})) {
-                    push(@{$recipeMap{$recipe}}, $charid);
-                } else {
-                 $recipeMap{$recipe} = [ $charid ];
-                }
-                #$recipecount++;
             }
         }
+        if ($profcount == 0) {
+            push(@noncrafters, $charid);
+        }
+        next if !exists($apijson->{'feed'});
+        $timestamps{$charid} = substr($apijson->{'feed'}->[0]->{'timestamp'}, 0, 10);
     }
-    #$totalrecipecount += $recipecount;
-}
 
-my $count = 0;
-my $total = scalar keys %recipeMap;
-# populate the recipes table
-my $ins_recipe = $dbh->prepare("INSERT INTO recipes (recipe_id, name, bop) VALUES (?, ?, ?)");
-foreach my $spellid (keys %recipeMap) {
-    my $spellname = get_spell_name($spellid);
-    $ins_recipe->execute($spellid, $spellname, 'true') or die $dbh->errstr;
-    print "getting name for $spellid = $spellname ($count/$total)\n";
-    $count++;
-}
-print "inserted $count unique recipes into the db\n";
-$count = 0;
+    # make updates to characters (availability, activity, professions)
+    my $noncraftcount = scalar @noncrafters;
+    my $oldcount = scalar @oldchars;
+    print "flagging $noncraftcount chars as not crafters\n";
+    update_flag('crafter', @noncrafters);
+    print "flagging $oldcount chars as old/unavailable\n";
+    update_flag('available', @oldchars);
 
-print "inserting char-recipe relations into the db, this may take some time...\n";
-# populate char_recipes table
-my $ins_char = $dbh->prepare("INSERT INTO char_recipe (recipe_id, char_id) VALUES (?, ?)");
-foreach my $recipe (keys %recipeMap) {
-    foreach my $charid (@{$recipeMap{$recipe}}) {
-        $ins_char->execute($recipe, $charid) or die $dbh->errstr;
+    my $timeupd = $dbh->prepare("UPDATE characters SET timestamp = ? WHERE char_id = ?");
+    foreach my $charid (keys %timestamps) {
+        $timeupd->execute($charid, $timestamps{$charid}) or die $dbh->errstr;
+    }
+
+
+    my $count = 0;
+    
+    # populate the recipes table
+    my $ins_recipe = $dbh->prepare("INSERT INTO recipes (recipe_id, name) VALUES (?, ?)");
+    foreach my $spellid (keys %recipeMap) {
+        next if exists($known->{$spellid});
+        my $spellname = get_spell_name($spellid);
+        $ins_recipe->execute($spellid, $spellname) or die $dbh->errstr;
+        print "getting name for $spellid = $spellname\n";
         $count++;
     }
+    $dbh->commit;
+    print "inserted $count new recipes into the db\n";
+    $count = 0;
+
+    print "inserting char-recipe relations into the db, this may take some time...\n";
+    # populate char_recipes table
+    my $ins_char = $dbh->prepare("INSERT INTO char_recipe (recipe_id, char_id) VALUES (?, ?)");
+    foreach my $recipe (keys %recipeMap) {
+        foreach my $charid (@{$recipeMap{$recipe}}) {
+            $ins_char->execute($recipe, $charid) or die $dbh->errstr;
+            $count++;
+        }
+    }
+    print "inserted $count recipe-char relationships into the db\n";
+    $dbh->commit;
+
 }
-print "inserted $count recipe-char relationships into the db\n";
 
 
 
-#while (my ($key, $value) = each %recipeMap) {
-#    print "saw $key $value times\n";
-#}
-#my $uniques = scalar keys %recipeMap;
-#print "found $uniques recipes\n";
-
-
-
-
-$dbh->commit;
 $dbh->disconnect;
 
 # PROGRAM ENDS HERE, FUNCTIONS BELOW
@@ -166,6 +184,16 @@ sub addrecipes {
     my ($name, $realm, @recipes) = @_;
     #my $ins = $dbh->prepare("INSERT INTO 
 
+}
+
+sub update_flag {
+    my ($flag, @chars) = @_;
+
+    my $upd = $dbh->prepare("UPDATE characters SET $flag = ? WHERE char_id = ?");
+    foreach (@chars) {
+        $upd->execute('f', $_) or die $dbh->errstr;
+    }
+    $dbh->commit;
 }
 
 

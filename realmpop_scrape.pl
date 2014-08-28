@@ -62,10 +62,10 @@ my $newtime = Time::HiRes::gettimeofday();
 printf("processed realmlist in %.2f seconds\n", $newtime - $starttime);
 
 
-
 # grab each realm's json data from realmpop site and save it to the disk
 my $realmcount = scalar keys $jsonrealms;
 my $realmno = 0;
+=for comment
 foreach my $realm (keys $jsonrealms) {
     my $realmreq = HTTP::Request->new(GET => $url . 'us-' . $realm . '.json');    
     my $realmres = $ua->request($realmreq);
@@ -85,6 +85,7 @@ foreach my $realm (keys $jsonrealms) {
     printf("downloaded $realm ($realmno/$realmcount) in %.2f seconds\n", $duration);
     $realmno++;
 }
+=cut
 $newtime = Time::HiRes::gettimeofday();
 printf("finished downloading realms in %.2f seconds\n", $newtime - $starttime);
 
@@ -140,9 +141,7 @@ while (my $realm = readdir(DIR)) {
             }
         }
     }
-    #bulkaddchars(@addchars);
     bulkaddcharswithcopy(@addchars);
-    #$dbh->commit if $realmno / 10 == 0; # herp
     $totalcharcount += $realmcharcount;
     my $parsetime = Time::HiRes::gettimeofday();
     printf("parsed %d chars from %s (%d/%d) in %.2f seconds\n", $realmcharcount, $realm, $realmno, $realmcount, $parsetime - $newtime);
@@ -185,11 +184,13 @@ sub bulkaddcharswithcopy {
 
     my (@addchars) = @_;
     
-    $dbh->do("COPY characters (name, realm, faction) FROM STDIN WITH DELIMITER ','")
+    $dbh->do("COPY characters (name, realm, faction, crafter, available, timestamp) FROM STDIN WITH DELIMITER ','")
         or die $dbh->errstr;
 
     foreach(@addchars) {
-        $dbh->pg_putcopydata("$_->{name},$_->{realm},$_->{faction}\n")
+        # we set everyone to be available and crafter so they get scanned at least once
+        # the timestamp is 23rd november 2004, the date WoW was originally released
+        $dbh->pg_putcopydata("$_->{name},$_->{realm},$_->{faction},TRUE,TRUE,1101168000\n")
             or die $dbh->errstr;
     }
     $dbh->pg_putcopyend();
