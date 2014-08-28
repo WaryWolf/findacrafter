@@ -10,7 +10,7 @@ UPDATE: Blizzard has a new API and website - [dev.battle.net](http://dev.battle.
 
 We are stealing character census data from [wow.realmpop.com](http://wow.realmpop.com/us.html) but any other sources of info would be good
 
-
+Look at table partitioning in postgres - thanks aidan - http://www.postgresql.org/docs/9.1/static/ddl-partitioning.html
 
 ### TODO LIST ###
 
@@ -30,6 +30,8 @@ Secondary goals:
 * move functions out into module, fix up bad coding practice, etc.
 
 Database speed can be improved by following this guide - [Tuning your Postgres Server](https://wiki.postgresql.org/wiki/Tuning_Your_PostgreSQL_Server). I was able to get 20k rows inserted per second running on a dedicated server, and about 15k rows/second on a VM at home.
+
+"The character and guild API resources do honor HTTP requests that contain the "If-Modified-Since" header." <- put a last-checked timestamp in characters table and use that for requests to save on processing time (and be nice to the api, whom we love so much)
 
 ### How do I get set up? ###
 
