@@ -6,13 +6,18 @@ use warnings;
 use Data::Dumper;
 use JSON::XS;
 use HTTP::Request;
-use LWP;
-use LWP::ConnCache;
 use Time::HiRes;
 use Getopt::Long;
 use DBI;
 use File::Slurp;
 
+use Coro;
+use Coro::LWP;
+use EV;
+use LWP;
+use LWP::ConnCache;
+
+sub threaded_get ($$$);
 #my $mode = '';
 
 #GetOptions('mode=s' => \$mode);
@@ -52,90 +57,130 @@ my @craftingprofs = (
 
 # set up objects
 my $dbh = DBI->connect("DBI:Pg:dbname=armory;host=localhost","armory","dicks1234", {pg_enable_utf8 => 1, AutoCommit => 0});
-my $conncache = LWP::ConnCache->new();
-$conncache->total_capacity([1]);
+#my $conncache = LWP::ConnCache->new();
+#$conncache->total_capacity([1]);
 my $ua = LWP::UserAgent->new;
-$ua->conn_cache($conncache);
+#$ua->conn_cache($conncache);
 binmode(STDOUT, ":utf8");
 
+my %results;
+my $apicount;
+#my $realmlist =  $dbh->selectall_hashref("SELECT DISTINCT(realm) FROM characters", "realm");
+my $realmlist = $dbh->selectall_hashref("SELECT realm, realm_id FROM realms", "realm");
 
-my $realmlist =  $dbh->selectall_hashref("SELECT DISTINCT(realm) FROM characters", "realm");
-
+async { EV::loop };
 
 foreach my $realm (keys %{$realmlist}) {
 
-
+    my $realmid = $realmlist->{$realm}->{'realm_id'};
+    
     # grab already known recipes
     my $known = $dbh->selectall_hashref("SELECT recipe_id FROM recipes", "recipe_id");
 
-    my $sql = "SELECT char_id FROM characters WHERE realm = '$realm'";
+    my $sql = "SELECT char_id FROM characters_$realmid";
     my $charcount = $dbh->do($sql);
 
     print "looking at $charcount chars on '$realm'\n";
 
-    my $charlist = $dbh->prepare("SELECT name, realm, char_id FROM characters WHERE realm = '$realm' limit 100");
+    my $charlist = $dbh->prepare("SELECT name, char_id FROM characters_$realmid LIMIT 100");
+    #my $charlist = $dbh->prepare("SELECT name, char_id FROM characters_$realmid");
 
     $charlist->execute or die $dbh->errstr;
     die $charlist->errstr if ($charlist->err);
 
     my %recipeMap;
-    my $chariter = 0;
+    my $chariter = 1;
     my %timestamps;
     my @oldchars;
     my @noncrafters;
     my $profcount;
-
-    while (my ($name, $realm, $charid) = $charlist->fetchrow_array) {
+    my $threadcount = 0;
+    my @threads;
+    while (my ($name, $charid) = $charlist->fetchrow_array) {
         print "grabbing info for $name/$realm ($chariter/$charcount)\n";
         $chariter++;
         my $apireq_url = "$url/$realm/$name?fields=professions,feed";
-        my $apireq = HTTP::Request->new(GET => $apireq_url);
-        my $apires = $ua->request($apireq);
-        if ($apires->code != 200) {
-            push(@oldchars,$charid);
-            next;
+
+
+        my $thread = threaded_get($name,$realm,$charid);
+        push(@threads,$thread);
+        #push(@threads,threaded_get($apireq_url));
+
+
+        $threadcount++;
+        next if $threadcount < $threadlimit;
+
+        #handle threads
+        print "waiting on threads...\n";
+
+        #my @threadres = map { $_->join } @threads;
+        foreach my $thread (@threads) {
+            $thread->join;
         }
-        if ((length($apires->content) < 5) or ($apires->code == 404)) {
-            #print "got a bad response, skipping $name\n";
-            # delete the char here or something
-            push(@oldchars,$charid);
-            next;
-        }
-        my $apijson = decode_json($apires->content);
-        print "$name is still bad\n" if exists($apijson->{"status"});
-        $profcount = 0;
-        foreach my $prof ($apijson->{'professions'}->{'primary'}) {
-            #print Dumper($prof->[0]);
-            #die;
-            next if !exists($prof->[0]->{'name'});
-            my $profName = $prof->[0]->{'name'};
-            if (grep(/^$profName$/,@craftingprofs)) {
-                $profcount++;
-                foreach my $recipe (@{$prof->[0]->{'recipes'}}) {
-                    if (exists($recipeMap{$recipe})) {
-                        push(@{$recipeMap{$recipe}}, $charid);
-                    } else {
-                     $recipeMap{$recipe} = [ $charid ];
+        @threads = ();
+        $threadcount = 0;
+
+
+        foreach my $charid (keys %results) {
+            my $chardata = $results{$charid}{'content'};
+            my $name = $results{$charid}{'name'};
+            my $realm = $results{$charid}{'realm'};
+
+            if ($chardata->code == 503) {
+                die "Blizzard got mad at us after $apicount requests...\n";
+            }
+
+            if ((length($chardata->content) < 5) or ($chardata->code != 200)) {
+                #print "got a bad response, skipping $name\n";
+                # delete the char here or something
+                push(@oldchars,$charid);
+                next;
+            }
+
+            my $apijson = decode_json($chardata->content);
+            print "$name is still bad\n" if exists($apijson->{"status"});
+            $profcount = 0;
+            foreach my $prof ($apijson->{'professions'}->{'primary'}) {
+                #print Dumper($prof->[0]);
+                #die;
+                next if !exists($prof->[0]->{'name'});
+                my $profName = $prof->[0]->{'name'};
+                if (grep(/^$profName$/,@craftingprofs)) {
+                    $profcount++;
+                    foreach my $recipe (@{$prof->[0]->{'recipes'}}) {
+                        if (exists($recipeMap{$recipe})) {
+                            push(@{$recipeMap{$recipe}}, $charid);
+                        } else {
+                         $recipeMap{$recipe} = [ $charid ];
+                        }
                     }
                 }
             }
+            if ($profcount == 0) {
+                push(@noncrafters, $charid);
+            }
+            next if !exists($apijson->{'feed'});
+            $timestamps{$charid} = substr($apijson->{'feed'}->[0]->{'timestamp'}, 0, 10);
         }
-        if ($profcount == 0) {
-            push(@noncrafters, $charid);
-        }
-        next if !exists($apijson->{'feed'});
-        $timestamps{$charid} = substr($apijson->{'feed'}->[0]->{'timestamp'}, 0, 10);
+        $apicount += $threadlimit;
+        undef %results;
     }
+
+    # clean up threads
+    foreach my $thread (@threads) {
+        $thread->join;
+    }
+
 
     # make updates to characters (availability, activity, professions)
     my $noncraftcount = scalar @noncrafters;
     my $oldcount = scalar @oldchars;
     print "flagging $noncraftcount chars as not crafters\n";
-    update_flag('crafter', @noncrafters);
+    update_flag('crafter', $realmid, @noncrafters);
     print "flagging $oldcount chars as old/unavailable\n";
-    update_flag('available', @oldchars);
+    update_flag('available', $realmid, @oldchars);
 
-    my $timeupd = $dbh->prepare("UPDATE characters SET timestamp = ? WHERE char_id = ?");
+    my $timeupd = $dbh->prepare("UPDATE characters_$realmid SET timestamp = ? WHERE char_id = ?");
     foreach my $charid (keys %timestamps) {
         $timeupd->execute($charid, $timestamps{$charid}) or die $dbh->errstr;
     }
@@ -158,7 +203,7 @@ foreach my $realm (keys %{$realmlist}) {
 
     print "inserting char-recipe relations into the db, this may take some time...\n";
     # populate char_recipes table
-    my $ins_char = $dbh->prepare("INSERT INTO char_recipe (recipe_id, char_id) VALUES (?, ?)");
+    my $ins_char = $dbh->prepare("INSERT INTO char_recipe_$realmid (recipe_id, char_id) VALUES (?, ?)");
     foreach my $recipe (keys %recipeMap) {
         foreach my $charid (@{$recipeMap{$recipe}}) {
             $ins_char->execute($recipe, $charid) or die $dbh->errstr;
@@ -177,19 +222,30 @@ $dbh->disconnect;
 # PROGRAM ENDS HERE, FUNCTIONS BELOW
 
 
-#TODO this thing needs to insert the array of recipes into char_recipe
-# however you should make sure the recipe exists in the recipes table
-sub addrecipes {
 
-    my ($name, $realm, @recipes) = @_;
-    #my $ins = $dbh->prepare("INSERT INTO 
+sub threaded_get ($$$) {
+    #my ($url) = @_;
+    my $name = shift;
+    my $realm = shift;
+    my $charid = shift;
 
+    my $fullurl = "$url/$realm/$name?fields=professions,feed";
+    return async {
+        my $ua = LWP::UserAgent->new;
+        my $req = HTTP::Request->new(GET => $fullurl);
+        my $res = $ua->request($req);
+        #print "got ",$res->code," for $url\n";
+        $results{$charid}{'content'} = $res;
+        $results{$charid}{'realm'} = $realm;
+        $results{$charid}{'name'} = $name
+    }
 }
 
-sub update_flag {
-    my ($flag, @chars) = @_;
 
-    my $upd = $dbh->prepare("UPDATE characters SET $flag = ? WHERE char_id = ?");
+sub update_flag {
+    my ($flag, $realmid, @chars) = @_;
+
+    my $upd = $dbh->prepare("UPDATE characters_$realmid SET $flag = ? WHERE char_id = ?");
     foreach (@chars) {
         $upd->execute('f', $_) or die $dbh->errstr;
     }
