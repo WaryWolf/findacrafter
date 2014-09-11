@@ -62,6 +62,7 @@ my $newtime = Time::HiRes::gettimeofday();
 printf("processed realmlist in %.2f seconds\n", $newtime - $starttime);
 
 
+
 # grab each realm's json data from realmpop site and save it to the disk
 my $realmcount = scalar keys $jsonrealms;
 my $realmno = 0;
@@ -89,6 +90,14 @@ foreach my $realm (keys $jsonrealms) {
 $newtime = Time::HiRes::gettimeofday();
 printf("finished downloading realms in %.2f seconds\n", $newtime - $starttime);
 
+my $addrealm = $dbh->prepare("INSERT INTO realms (realm) VALUES (?)");
+
+foreach my $realm (keys $jsonrealms) {
+
+    $addrealm->execute($realm);
+}
+
+my $realmlist = $dbh->selectall_hashref("SELECT realm, realm_id FROM realms", "realm");
 
 
 # process saved json files
@@ -107,10 +116,40 @@ while (my $realm = readdir(DIR)) {
     my $realmjson = decode_json($realmdata);
     my $realmchars = $realmjson->{'characters'};
 
+    my $realmid = $realmlist->{$realm}->{'realm_id'};
+
     my $faction;
     my $realmcharcount = 0;
     $realmno++;
     my @addchars;
+=for comment
+    my $sqladdtable1 = 
+        "CREATE TABLE characters_$realmid (
+        CHECK(realm_id = '$realmid')) 
+        INHERITS(characters);";
+=cut
+
+    #realm_id INTEGER REFERENCES realms(realm_id),
+    #CHECK(realm_id = '$realmid')
+    my $sqladdtable1 =
+        "CREATE TABLE characters_$realmid (
+        char_id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        faction CHAR(1) NOT NULL,
+        crafter BOOL NOT NULL,
+        available BOOL NOT NULL,
+        timestamp INTEGER,
+        UNIQUE(name)
+        );";
+    my $sqladdtable2 = 
+        "CREATE TABLE char_recipe_$realmid (
+        char_id INTEGER REFERENCES characters_$realmid(char_id),
+        recipe_id INTEGER REFERENCES recipes(recipe_id),
+        PRIMARY KEY(char_id, recipe_id)
+        );";
+    $dbh->do($sqladdtable1);
+    $dbh->do($sqladdtable2);
+
 
     foreach my $gender (keys $realmchars) {
         next if $gender eq 'Unknown';
@@ -134,14 +173,15 @@ while (my $realm = readdir(DIR)) {
                     #print Dumper($realmchars->{$gender}->{$class}->{$race});
                     foreach my $name (@{$realmchars->{$gender}->{$class}->{$race}->{$level}}) {
                         #print "adding $name, $realm, $faction\n";
-                        push(@addchars, { name => $name, realm => $realm, faction => $faction});
+                        #push(@addchars, { name => $name, realm => $realm, faction => $faction});
+                        push(@addchars, { name => $name, faction => $faction});
                         $realmcharcount++;
                     }
                 }
             }
         }
     }
-    bulkaddcharswithcopy(@addchars);
+    bulkaddchars($realmid, @addchars);
     $totalcharcount += $realmcharcount;
     my $parsetime = Time::HiRes::gettimeofday();
     printf("parsed %d chars from %s (%d/%d) in %.2f seconds\n", $realmcharcount, $realm, $realmno, $realmcount, $parsetime - $newtime);
@@ -155,42 +195,17 @@ $dbh->disconnect;
 
 # PROGRAM ENDS HERE, FUNCTIONS BELOW
 
-sub addchar {
-    my ($name, $realm, $faction, $flag) = @_;
-    my $ins = $dbh->prepare("INSERT INTO characters (name, realm, faction) VALUES ('$name', '$realm', '$faction')");
-    $ins->execute();
-
-    # return the id of the char you just inserted, if $flag is set
-    #if ($flag) {
-    #    my $id = $dbh->last_insert_id(undef,undef,"characters",undef);
-    #    return $id;
-    #}
-}
-
 sub bulkaddchars {
 
-    my (@addchars) = @_;
-
-    my $ins = $dbh->prepare("INSERT INTO characters (name, realm, faction) VALUES (?, ?, ?)") or die $dbh->errstr;
-    foreach (@addchars) {
-        #print "inserting $_->{name} $_->{realm} $_->{faction}\n";
-        $ins->execute($_->{name}, $_->{realm}, $_->{faction}) or die $dbh->errstr;
-    }
- 
-    $dbh->commit or die $dbh->errstr;
-}
-
-sub bulkaddcharswithcopy {
-
-    my (@addchars) = @_;
+    my ($realmid, @addchars) = @_;
     
-    $dbh->do("COPY characters (name, realm, faction, crafter, available, timestamp) FROM STDIN WITH DELIMITER ','")
+    $dbh->do("COPY characters_$realmid (name, faction, crafter, available, timestamp) FROM STDIN WITH DELIMITER ','")
         or die $dbh->errstr;
 
     foreach(@addchars) {
         # we set everyone to be available and crafter so they get scanned at least once
         # the timestamp is 23rd november 2004, the date WoW was originally released
-        $dbh->pg_putcopydata("$_->{name},$_->{realm},$_->{faction},TRUE,TRUE,1101168000\n")
+        $dbh->pg_putcopydata("$_->{name},$_->{faction},TRUE,TRUE,1101168000\n")
             or die $dbh->errstr;
     }
     $dbh->pg_putcopyend();

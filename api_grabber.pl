@@ -57,14 +57,17 @@ my @craftingprofs = (
 
 # set up objects
 my $dbh = DBI->connect("DBI:Pg:dbname=armory;host=localhost","armory","dicks1234", {pg_enable_utf8 => 1, AutoCommit => 0});
-#my $conncache = LWP::ConnCache->new();
-#$conncache->total_capacity([1]);
+my $conncache = LWP::ConnCache->new();
+$conncache->total_capacity([1]);
 my $ua = LWP::UserAgent->new;
-#$ua->conn_cache($conncache);
+$ua->conn_cache($conncache);
 binmode(STDOUT, ":utf8");
 
 my %results;
 my $apicount;
+my $threadlimit = 10;
+
+
 #my $realmlist =  $dbh->selectall_hashref("SELECT DISTINCT(realm) FROM characters", "realm");
 my $realmlist = $dbh->selectall_hashref("SELECT realm, realm_id FROM realms", "realm");
 
@@ -75,15 +78,16 @@ foreach my $realm (keys %{$realmlist}) {
     my $realmid = $realmlist->{$realm}->{'realm_id'};
     
     # grab already known recipes
-    my $known = $dbh->selectall_hashref("SELECT recipe_id FROM recipes", "recipe_id");
+    my $known = $dbh->selectall_hashref("SELECT recipe_id FROM recipes", "recipe_id")
+        or die $dbh->errstr;
 
     my $sql = "SELECT char_id FROM characters_$realmid";
-    my $charcount = $dbh->do($sql);
+    my $charcount = $dbh->do($sql) or die $dbh->errstr;
 
     print "looking at $charcount chars on '$realm'\n";
 
-    my $charlist = $dbh->prepare("SELECT name, char_id FROM characters_$realmid LIMIT 100");
-    #my $charlist = $dbh->prepare("SELECT name, char_id FROM characters_$realmid");
+    #my $charlist = $dbh->prepare("SELECT name, char_id FROM characters_$realmid LIMIT 100");
+    my $charlist = $dbh->prepare("SELECT name, char_id FROM characters_$realmid");
 
     $charlist->execute or die $dbh->errstr;
     die $charlist->errstr if ($charlist->err);
@@ -260,7 +264,8 @@ sub get_spell_name {
     my $url = "http://us.battle.net/api/wow/spell/$spellid";
     my $req = HTTP::Request->new(GET => $url);
     my $res = $ua->request($req);
-    die "grabbing $url failed: ",$res->code,"\n" if !$res->is_success;
+    $apicount++;
+    die "grabbing $url failed: ",$res->code," after $apicount requests\n" if !$res->is_success;
     my $json = decode_json($res->content);
     die "bad request at $url: $json->{'status'}\n" if exists($json->{'status'});
     return $json->{'name'} or die "spell name for $spellid not found\n";
