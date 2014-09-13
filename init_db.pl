@@ -13,10 +13,10 @@ use Getopt::Long;
 use DBI;
 use File::Slurp;
 
-#my $mode = '';
+my $download = '';
 
-#GetOptions('mode=s' => \$mode);
-#if (($mode ne 'download') and ($mode ne 'process')) {
+GetOptions('download' => \$download);
+
 
 # constants
 my $url = 'http://wow.realmpop.com/';
@@ -48,6 +48,9 @@ $ua->conn_cache($conncache);
 binmode(STDOUT, ":utf8");
 
 
+$dbh->do("SET client_min_messages = WARNING") or die $dbh->err;
+
+
 # grab the list of realms from the realmpop site and parse it
 
 my $starttime = Time::HiRes::gettimeofday();
@@ -66,30 +69,29 @@ printf("processed realmlist in %.2f seconds\n", $newtime - $starttime);
 # grab each realm's json data from realmpop site and save it to the disk
 my $realmcount = scalar keys $jsonrealms;
 my $realmno = 0;
-=for comment
-foreach my $realm (keys $jsonrealms) {
-    my $realmreq = HTTP::Request->new(GET => $url . 'us-' . $realm . '.json');    
-    my $realmres = $ua->request($realmreq);
-    if (!$realmres->is_success) {
-        die "http aint workin\n";
+if ($download) {
+    foreach my $realm (keys $jsonrealms) {
+        my $realmreq = HTTP::Request->new(GET => $url . 'us-' . $realm . '.json');    
+        my $realmres = $ua->request($realmreq);
+        if (!$realmres->is_success) {
+            die "http aint workin\n";
+        }
+        my $realmdata = $realmres->content;
+        write_file($path.$realm, { binmode => ':utf8' }, $realmdata);
+        
+        #open(my $realmfile, ">", $path . $realm)
+        #    or die "couldn't open file $path $realm \n";
+        #print $realmfile $realmdata;
+        #close($realmfile);
+        my $realmtime = Time::HiRes::gettimeofday();
+        my $duration = $realmtime - $newtime;
+        $newtime = $realmtime;
+        printf("downloaded $realm ($realmno/$realmcount) in %.2f seconds\n", $duration);
+        $realmno++;
     }
-    my $realmdata = $realmres->content;
-    write_file($path.$realm, { binmode => ':utf8' }, $realmdata);
-    
-    #open(my $realmfile, ">", $path . $realm)
-    #    or die "couldn't open file $path $realm \n";
-    #print $realmfile $realmdata;
-    #close($realmfile);
-    my $realmtime = Time::HiRes::gettimeofday();
-    my $duration = $realmtime - $newtime;
-    $newtime = $realmtime;
-    printf("downloaded $realm ($realmno/$realmcount) in %.2f seconds\n", $duration);
-    $realmno++;
+    $newtime = Time::HiRes::gettimeofday();
+    printf("finished downloading realms in %.2f seconds\n", $newtime - $starttime);
 }
-=cut
-$newtime = Time::HiRes::gettimeofday();
-printf("finished downloading realms in %.2f seconds\n", $newtime - $starttime);
-
 my $addrealm = $dbh->prepare("INSERT INTO realms (realm) VALUES (?)");
 
 foreach my $realm (keys $jsonrealms) {
@@ -109,9 +111,6 @@ opendir (DIR, $path) or die $!;
 
 while (my $realm = readdir(DIR)) {
     next if (($realm eq '..') or ($realm eq '.'));
-    #open(my $realmfile, "<", $path . $realm)
-    #    or die "couldn't open file $path $realm\n";
-    #my $realmdata = do { local $/; <$realmfile> };
     my $realmdata = read_file($path.$realm, {binmode => ':utf8'});
     my $realmjson = decode_json($realmdata);
     my $realmchars = $realmjson->{'characters'};
@@ -122,15 +121,7 @@ while (my $realm = readdir(DIR)) {
     my $realmcharcount = 0;
     $realmno++;
     my @addchars;
-=for comment
-    my $sqladdtable1 = 
-        "CREATE TABLE characters_$realmid (
-        CHECK(realm_id = '$realmid')) 
-        INHERITS(characters);";
-=cut
 
-    #realm_id INTEGER REFERENCES realms(realm_id),
-    #CHECK(realm_id = '$realmid')
     my $sqladdtable1 =
         "CREATE TABLE characters_$realmid (
         char_id SERIAL PRIMARY KEY,

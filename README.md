@@ -8,6 +8,8 @@ Blizzard API documentation is [here](https://github.com/Blizzard/api-wow-docs#ch
 
 UPDATE: Blizzard has a new API and website - [dev.battle.net](http://dev.battle.net). Apparently there aren't any new features yet, but you can sign up for an API key and get a higher limit on requests per day.
 
+As of 10th September 2014, the "limit" on requests before blizzard starts giving you 503 errors is 103,000. 
+
 We are stealing character census data from [wow.realmpop.com](http://wow.realmpop.com/us.html) but any other sources of info would be good.
 
 ### FEATURES COMPLETE ###
@@ -23,8 +25,9 @@ Functionality:
 
 * Need to figure out what information should be stored in the database - schema review
 * Queueing system to avoid checking same characters too often - probably based on timestamp field for each character
-* Set some kind of query limit, once we figure out what the limit is (50-75k per day i think)
+* Set a per-day query limit (100k requests before we get a 503, maybe use 80k to be on the safe side)
 * web front-end for querying the DB - PHP? node.js? something secure, quick, easy to understand.
+* add argument parsing so we don't need to edit the code to change stuff
 
 Other:
 
@@ -32,7 +35,7 @@ Other:
 
 Secondary goals:
 
-
+* character discovery through examining each char's guild/looking up their guild members (this could be run on another server to avoid the API limit!)
 
 * add compatibility stuff for other SQL DBs? I'm using postgres for personal preference/it was already installed on this VM.
 
@@ -45,8 +48,9 @@ Database speed can be improved by following this guide - [Tuning your Postgres S
 ### How do I get set up? ###
 
 * Install perl, any perl dependencies, and postgresql
-* Use armory.sql to configure and set up the database (you'll have to make the database and user first)
-* Run realmpop_scrape.pl to grab data out of wow.realmpop.com and store it in the database
+* use init_db.sql to create the database and user, and set permissions (edit the file if you want to change the DB/user name/password)
+* use reset_db.sql to create the necessary tables (you can also run this to clear all data from the database)
+* Run init_db.pl to grab data out of wow.realmpop.com and store it in the database
 * run api_grabber.pl to use the grabbed data to start querying the blizzard API
 
 ### Dependencies ###

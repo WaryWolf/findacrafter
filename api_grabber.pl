@@ -65,7 +65,7 @@ binmode(STDOUT, ":utf8");
 
 my %results;
 my $apicount;
-my $threadlimit = 10;
+my $threadlimit = 20;
 
 
 #my $realmlist =  $dbh->selectall_hashref("SELECT DISTINCT(realm) FROM characters", "realm");
@@ -86,8 +86,8 @@ foreach my $realm (keys %{$realmlist}) {
 
     print "looking at $charcount chars on '$realm'\n";
 
-    #my $charlist = $dbh->prepare("SELECT name, char_id FROM characters_$realmid LIMIT 100");
-    my $charlist = $dbh->prepare("SELECT name, char_id FROM characters_$realmid");
+    my $charlist = $dbh->prepare("SELECT name, char_id FROM characters_$realmid LIMIT 100");
+    #my $charlist = $dbh->prepare("SELECT name, char_id FROM characters_$realmid");
 
     $charlist->execute or die $dbh->errstr;
     die $charlist->errstr if ($charlist->err);
