@@ -129,7 +129,8 @@ while (my $realm = readdir(DIR)) {
         faction CHAR(1) NOT NULL,
         crafter BOOL NOT NULL,
         available BOOL NOT NULL,
-        timestamp INTEGER,
+        last_active INTEGER,
+        last_checked INTEGER DEFAULT 0,
         UNIQUE(name)
         );";
     my $sqladdtable2 = 
@@ -138,8 +139,8 @@ while (my $realm = readdir(DIR)) {
         recipe_id INTEGER REFERENCES recipes(recipe_id),
         PRIMARY KEY(char_id, recipe_id)
         );";
-    $dbh->do($sqladdtable1);
-    $dbh->do($sqladdtable2);
+    $dbh->do($sqladdtable1) or die $dbh->errstr;
+    $dbh->do($sqladdtable2) or die $dbh->errstr;
 
 
     foreach my $gender (keys $realmchars) {
@@ -190,7 +191,7 @@ sub bulkaddchars {
 
     my ($realmid, @addchars) = @_;
     
-    $dbh->do("COPY characters_$realmid (name, faction, crafter, available, timestamp) FROM STDIN WITH DELIMITER ','")
+    $dbh->do("COPY characters_$realmid (name, faction, crafter, available, last_active) FROM STDIN WITH DELIMITER ','")
         or die $dbh->errstr;
 
     foreach(@addchars) {

@@ -18,10 +18,13 @@ use LWP;
 use LWP::ConnCache;
 
 sub threaded_get ($$$);
-#my $mode = '';
+sub vprint ($);
 
-#GetOptions('mode=s' => \$mode);
-#if (($mode ne 'download') and ($mode ne 'process')) {
+my $verbose;
+my $charlimit = 100;
+
+
+GetOptions('verbose' => \$verbose);
 
 # constants
 my $url = 'http://us.battle.net/api/wow/character';
@@ -64,19 +67,23 @@ $ua->conn_cache($conncache);
 binmode(STDOUT, ":utf8");
 
 my %results;
-my $apicount;
+my $apicount = 0;;
 my $threadlimit = 20;
+my $twomonthsago = time() - 4838400;
 
 
 #my $realmlist =  $dbh->selectall_hashref("SELECT DISTINCT(realm) FROM characters", "realm");
 my $realmlist = $dbh->selectall_hashref("SELECT realm, realm_id FROM realms", "realm");
+my $realmcount = scalar keys $realmlist;
+my $realmno = 0;
+
 
 async { EV::loop };
 
 foreach my $realm (keys %{$realmlist}) {
 
     my $realmid = $realmlist->{$realm}->{'realm_id'};
-    
+    $realmno++;
     # grab already known recipes
     my $known = $dbh->selectall_hashref("SELECT recipe_id FROM recipes", "recipe_id")
         or die $dbh->errstr;
@@ -84,13 +91,23 @@ foreach my $realm (keys %{$realmlist}) {
     my $sql = "SELECT char_id FROM characters_$realmid";
     my $charcount = $dbh->do($sql) or die $dbh->errstr;
 
-    print "looking at $charcount chars on '$realm'\n";
+    print "looking at $charlimit of $charcount chars on '$realm' ($realmno/$realmcount)\n";
 
-    my $charlist = $dbh->prepare("SELECT name, char_id FROM characters_$realmid LIMIT 100");
+    my $charlist = $dbh->prepare(
+        "SELECT name, char_id 
+        FROM characters_$realmid
+        WHERE last_checked < '$twomonthsago'
+        LIMIT $charlimit");
+#        ");
     #my $charlist = $dbh->prepare("SELECT name, char_id FROM characters_$realmid");
 
     $charlist->execute or die $dbh->errstr;
     die $charlist->errstr if ($charlist->err);
+
+
+    #my $charrecipeknown = $dbh->selectall_arrayref("SELECT recipe_id FROM char_recipe_$realmid");
+    #my $charrecipeknown = $dbh->selectcol_arrayref("SELECT recipe_id FROM char_recipe_$realmid");
+
 
     my %recipeMap;
     my $chariter = 1;
@@ -101,9 +118,13 @@ foreach my $realm (keys %{$realmlist}) {
     my $threadcount = 0;
     my @threads;
     while (my ($name, $charid) = $charlist->fetchrow_array) {
-        print "grabbing info for $name/$realm ($chariter/$charcount)\n";
+
+        if ($apicount > 90000) {
+            die "hit requestlimit. will continue later.\n";
+        }
+        vprint "grabbing info for $name/$realm ($chariter/$charcount)\n";
         $chariter++;
-        my $apireq_url = "$url/$realm/$name?fields=professions,feed";
+        #my $apireq_url = "$url/$realm/$name?fields=professions,feed";
 
 
         my $thread = threaded_get($name,$realm,$charid);
@@ -115,7 +136,7 @@ foreach my $realm (keys %{$realmlist}) {
         next if $threadcount < $threadlimit;
 
         #handle threads
-        print "waiting on threads...\n";
+        vprint "waiting on threads...\n";
 
         #my @threadres = map { $_->join } @threads;
         foreach my $thread (@threads) {
@@ -135,8 +156,6 @@ foreach my $realm (keys %{$realmlist}) {
             }
 
             if ((length($chardata->content) < 5) or ($chardata->code != 200)) {
-                #print "got a bad response, skipping $name\n";
-                # delete the char here or something
                 push(@oldchars,$charid);
                 next;
             }
@@ -145,8 +164,6 @@ foreach my $realm (keys %{$realmlist}) {
             print "$name is still bad\n" if exists($apijson->{"status"});
             $profcount = 0;
             foreach my $prof ($apijson->{'professions'}->{'primary'}) {
-                #print Dumper($prof->[0]);
-                #die;
                 next if !exists($prof->[0]->{'name'});
                 my $profName = $prof->[0]->{'name'};
                 if (grep(/^$profName$/,@craftingprofs)) {
@@ -184,9 +201,11 @@ foreach my $realm (keys %{$realmlist}) {
     print "flagging $oldcount chars as old/unavailable\n";
     update_flag('available', $realmid, @oldchars);
 
-    my $timeupd = $dbh->prepare("UPDATE characters_$realmid SET timestamp = ? WHERE char_id = ?");
+    # update timestamps
+    my $nowtime = time();
+    my $timeupd = $dbh->prepare("UPDATE characters_$realmid SET last_active = ?, last_checked = ? WHERE char_id = ?");
     foreach my $charid (keys %timestamps) {
-        $timeupd->execute($charid, $timestamps{$charid}) or die $dbh->errstr;
+        $timeupd->execute($timestamps{$charid}, $nowtime, $charid) or die $dbh->errstr;
     }
 
 
@@ -205,11 +224,18 @@ foreach my $realm (keys %{$realmlist}) {
     print "inserted $count new recipes into the db\n";
     $count = 0;
 
-    print "inserting char-recipe relations into the db, this may take some time...\n";
+
+
     # populate char_recipes table
     my $ins_char = $dbh->prepare("INSERT INTO char_recipe_$realmid (recipe_id, char_id) VALUES (?, ?)");
     foreach my $recipe (keys %recipeMap) {
+
+        # get a list of all currently known crafters of this recipe
+        # so we don't insert something that already exists
+        my $knowncrafters = $dbh->selectall_hashref("SELECT char_id FROM char_recipe_$realmid WHERE recipe_id = $recipe", "char_id");
+
         foreach my $charid (@{$recipeMap{$recipe}}) {
+            next if exists ($knowncrafters->{$charid});
             $ins_char->execute($recipe, $charid) or die $dbh->errstr;
             $count++;
         }
@@ -238,20 +264,19 @@ sub threaded_get ($$$) {
         my $ua = LWP::UserAgent->new;
         my $req = HTTP::Request->new(GET => $fullurl);
         my $res = $ua->request($req);
-        #print "got ",$res->code," for $url\n";
         $results{$charid}{'content'} = $res;
         $results{$charid}{'realm'} = $realm;
-        $results{$charid}{'name'} = $name
+        $results{$charid}{'name'} = $name;
     }
 }
 
 
 sub update_flag {
     my ($flag, $realmid, @chars) = @_;
-
-    my $upd = $dbh->prepare("UPDATE characters_$realmid SET $flag = ? WHERE char_id = ?");
+    my $timenow = time();
+    my $upd = $dbh->prepare("UPDATE characters_$realmid SET $flag = ?, last_checked = ? WHERE char_id = ?");
     foreach (@chars) {
-        $upd->execute('f', $_) or die $dbh->errstr;
+        $upd->execute('f', $timenow, $_) or die $dbh->errstr;
     }
     $dbh->commit;
 }
@@ -312,4 +337,8 @@ sub bulkaddcharswithcopy {
     $dbh->commit or die $dbh->errstr;
 }
 
-
+# prints if --verbose set.
+sub vprint ($) {
+    my ($msg) = @_;
+    print $msg if defined($verbose);
+}
