@@ -227,17 +227,19 @@ foreach my $realm (keys %{$realmlist}) {
 
 
     # populate char_recipes table
-    my $ins_char = $dbh->prepare("INSERT INTO char_recipe_$realmid (recipe_id, char_id) VALUES (?, ?)");
+    #my $ins_char = $dbh->prepare("INSERT INTO char_recipe_$realmid (recipe_id, char_id) VALUES (?, ?)");
+    my $rows;
     foreach my $recipe (keys %recipeMap) {
 
         # get a list of all currently known crafters of this recipe
         # so we don't insert something that already exists
-        my $knowncrafters = $dbh->selectall_hashref("SELECT char_id FROM char_recipe_$realmid WHERE recipe_id = $recipe", "char_id");
+        #my $knowncrafters = $dbh->selectall_hashref("SELECT char_id FROM char_recipe_$realmid WHERE recipe_id = $recipe", "char_id");
 
         foreach my $charid (@{$recipeMap{$recipe}}) {
-            next if exists ($knowncrafters->{$charid});
-            $ins_char->execute($recipe, $charid) or die $dbh->errstr;
-            $count++;
+            #next if exists ($knowncrafters->{$charid});
+            $rows = $dbh->do("INSERT INTO char_recipe_$realmid (recipe_id, char_id) SELECT $recipe, $charid WHERE NOT EXISTS (SELECT * FROM char_recipe_$realmid WHERE recipe_id = $recipe AND char_id = $charid)");
+            #$ins_char->execute($recipe, $charid) or die $dbh->errstr;
+            $count += $rows;
         }
     }
     print "inserted $count recipe-char relationships into the db\n";
