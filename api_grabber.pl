@@ -20,11 +20,13 @@ use LWP::ConnCache;
 sub threaded_get ($$$);
 sub vprint ($);
 
+my $proxy;
 my $verbose;
 my $charlimit = 100;
 
 
-GetOptions('verbose' => \$verbose);
+GetOptions( 'verbose' => \$verbose,
+            'proxy=s' => \$proxy);
 
 # constants
 my $url = 'http://us.battle.net/api/wow/character';
@@ -265,6 +267,9 @@ sub threaded_get ($$$) {
     return async {
         my $ua = LWP::UserAgent->new;
         my $req = HTTP::Request->new(GET => $fullurl);
+        if (defined($proxy)) {
+            $ua->proxy('http',$proxy);
+        }
         my $res = $ua->request($req);
         $results{$charid}{'content'} = $res;
         $results{$charid}{'realm'} = $realm;
