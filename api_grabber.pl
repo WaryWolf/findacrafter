@@ -22,14 +22,16 @@ sub vprint ($);
 
 my $proxy;
 my $verbose;
+my $checkachieves;
 my $charlimit = 100;
 my $threadlimit = 20;
 
-GetOptions( 'verbose' => \$verbose,
-            'proxy=s' => \$proxy,
-	    'charperserver=i' => \$charlimit,
-	    'threads=i' => \$threadlimit
-		);
+GetOptions( 'verbose'           => \$verbose,
+            'checkachieves'     => \$checkachieves,
+            'proxy=s'           => \$proxy,
+	        'charperserver=i'   => \$charlimit,
+	        'threads=i'         => \$threadlimit
+);
 
 # constants
 my $url = 'http://us.battle.net/api/wow/character';
@@ -61,6 +63,40 @@ my @craftingprofs = (
         'Jewelcrafting',
         'Leatherworking',
         'Tailoring',
+);
+
+my %cma = (
+        6884    => 1,
+        6885    => 1,
+        6888    => 1,
+        6889    => 1,
+        6892    => 1,
+        6899    => 1,
+        6893    => 1,
+        6902    => 1,
+        6894    => 1,
+        6905    => 1,
+        6895    => 1,
+        6908    => 1,
+        6896    => 1,
+        6911    => 1,
+        6897    => 1,
+        6914    => 1,
+        6898    => 1,
+        6917    => 1
+);
+
+
+my %cmamap = (
+        6884    => 6885,
+        6888    => 6889,
+        6892    => 6899,
+        6893    => 6902,
+        6894    => 6905,
+        6895    => 6908,
+        6896    => 6911,
+        6897    => 6914,
+        6898    => 6917
 );
 
 # set up objects
@@ -185,6 +221,21 @@ foreach my $realm (keys %{$realmlist}) {
             }
             next if !exists($apijson->{'feed'});
             $timestamps{$charid} = substr($apijson->{'feed'}->[0]->{'timestamp'}, 0, 10);
+            if ($checkachieves) {
+                #print Dumper($apijson->{'achievements'}->{'achievementsCompleted'});
+                #die;
+                my %cmlist;
+                foreach my $ach (@{$apijson->{'achievements'}->{'achievementsCompleted'}}) {
+                    #print "$ach\n";
+                    next if !exists($cma{$ach});
+                    $cmlist{$ach} = 1;
+                }
+                foreach my $ach (keys %cmlist) {
+                    next if !exists($cmamap{$ach});
+                    my $achbronze = $cmamap{$ach};
+                    print "$name-$realm is a LOSER, they have $ach but not $achbronze!\n" if !exists($cmlist{$achbronze});
+                }
+            }
         }
         $apicount += $threadlimit;
         undef %results;
@@ -264,7 +315,7 @@ sub threaded_get ($$$) {
     my $realm = shift;
     my $charid = shift;
 
-    my $fullurl = "$url/$realm/$name?fields=professions,feed";
+    my $fullurl = "$url/$realm/$name?fields=professions,feed,achievements";
     return async {
         my $ua = LWP::UserAgent->new;
         my $req = HTTP::Request->new(GET => $fullurl);
