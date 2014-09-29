@@ -23,10 +23,13 @@ sub vprint ($);
 my $proxy;
 my $verbose;
 my $charlimit = 100;
-
+my $threadlimit = 20;
 
 GetOptions( 'verbose' => \$verbose,
-            'proxy=s' => \$proxy);
+            'proxy=s' => \$proxy,
+	    'charperserver=i' => \$charlimit,
+	    'threads=i' => \$threadlimit
+		);
 
 # constants
 my $url = 'http://us.battle.net/api/wow/character';
@@ -70,7 +73,6 @@ binmode(STDOUT, ":utf8");
 
 my %results;
 my $apicount = 0;;
-my $threadlimit = 20;
 my $twomonthsago = time() - 4838400;
 
 
@@ -126,7 +128,6 @@ foreach my $realm (keys %{$realmlist}) {
         }
         vprint "grabbing info for $name/$realm ($chariter/$charcount)\n";
         $chariter++;
-        #my $apireq_url = "$url/$realm/$name?fields=professions,feed";
 
 
         my $thread = threaded_get($name,$realm,$charid);
@@ -140,7 +141,6 @@ foreach my $realm (keys %{$realmlist}) {
         #handle threads
         vprint "waiting on threads...\n";
 
-        #my @threadres = map { $_->join } @threads;
         foreach my $thread (@threads) {
             $thread->join;
         }
@@ -162,7 +162,8 @@ foreach my $realm (keys %{$realmlist}) {
                 next;
             }
 
-            my $apijson = decode_json($chardata->content);
+            my $apijson = decode_json($chardata->content)
+		or die "malformed json: $chardata->content\n";
             print "$name is still bad\n" if exists($apijson->{"status"});
             $profcount = 0;
             foreach my $prof ($apijson->{'professions'}->{'primary'}) {
