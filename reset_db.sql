@@ -46,4 +46,10 @@ CREATE TABLE guilds (
     PRIMARY KEY (name, realm)
     );
 
+CREATE TABLE connections (
+    id INTEGER,
+    realm_id INTEGER REFERENCES realms(realm_id),
+    PRIMARY KEY (id, realm_id)
+    );
+
 \q

@@ -131,7 +131,7 @@ foreach my $realm (keys %{$realmlist}) {
     my $sql = "SELECT char_id FROM characters_$realmid";
     my $charcount = $dbh->do($sql) or die $dbh->errstr;
 
-    print "looking at $charlimit of $charcount chars on '$realm' ($realmno/$realmcount)\n";
+    vprint "looking at $charlimit of $charcount chars on '$realm' ($realmno/$realmcount)\n";
 
     my $charlist = $dbh->prepare(
         "SELECT name, char_id 
@@ -222,11 +222,8 @@ foreach my $realm (keys %{$realmlist}) {
             next if !exists($apijson->{'feed'});
             $timestamps{$charid} = substr($apijson->{'feed'}->[0]->{'timestamp'}, 0, 10);
             if ($checkachieves) {
-                #print Dumper($apijson->{'achievements'}->{'achievementsCompleted'});
-                #die;
                 my %cmlist;
                 foreach my $ach (@{$apijson->{'achievements'}->{'achievementsCompleted'}}) {
-                    #print "$ach\n";
                     next if !exists($cma{$ach});
                     $cmlist{$ach} = 1;
                 }
@@ -250,9 +247,9 @@ foreach my $realm (keys %{$realmlist}) {
     # make updates to characters (availability, activity, professions)
     my $noncraftcount = scalar @noncrafters;
     my $oldcount = scalar @oldchars;
-    print "flagging $noncraftcount chars as not crafters\n";
+    vprint "flagging $noncraftcount chars as not crafters\n";
     update_flag('crafter', $realmid, @noncrafters);
-    print "flagging $oldcount chars as old/unavailable\n";
+    vprint "flagging $oldcount chars as old/unavailable\n";
     update_flag('available', $realmid, @oldchars);
 
     # update timestamps
@@ -271,11 +268,11 @@ foreach my $realm (keys %{$realmlist}) {
         next if exists($known->{$spellid});
         my $spellname = get_spell_name($spellid);
         $ins_recipe->execute($spellid, $spellname) or die $dbh->errstr;
-        print "getting name for $spellid = $spellname\n";
+        vprint "getting name for $spellid = $spellname\n";
         $count++;
     }
     $dbh->commit;
-    print "inserted $count new recipes into the db\n";
+    vprint "inserted $count new recipes into the db\n" if $count > 0;
     $count = 0;
 
 
@@ -296,7 +293,7 @@ foreach my $realm (keys %{$realmlist}) {
             $count += $rows;
         }
     }
-    print "inserted $count recipe-char relationships into the db\n";
+    vprint "inserted $count recipe-char relationships into the db\n";
     $dbh->commit;
 
 }
@@ -314,14 +311,19 @@ sub threaded_get ($$$) {
     my $name = shift;
     my $realm = shift;
     my $charid = shift;
-
-    my $fullurl = "$url/$realm/$name?fields=professions,feed,achievements";
+    my $fullurl;
+    if ($checkachieves) {
+        $fullurl = "$url/$realm/$name?fields=professions,feed,achievements";
+    } else {
+        $fullurl = "$url/$realm/$name?fields=professions,feed";
+    }
     return async {
         my $ua = LWP::UserAgent->new;
-        my $req = HTTP::Request->new(GET => $fullurl);
+        $ua->timeout(10);
         if (defined($proxy)) {
             $ua->proxy('http',$proxy);
         }
+        my $req = HTTP::Request->new(GET => $fullurl);
         my $res = $ua->request($req);
         $results{$charid}{'content'} = $res;
         $results{$charid}{'realm'} = $realm;
