@@ -3,6 +3,10 @@
 use strict;
 use warnings;
 
+require "conf.pl";
+our $db_login;
+our $db_pass;
+
 use Data::Dumper;
 use JSON::XS;
 use HTTP::Request;
@@ -100,7 +104,7 @@ my %cmamap = (
 );
 
 # set up objects
-my $dbh = DBI->connect("DBI:Pg:dbname=armory;host=localhost","armory","dicks1234", {pg_enable_utf8 => 1, AutoCommit => 0});
+my $dbh = DBI->connect("DBI:Pg:dbname=armory;host=localhost",$db_login,$db_pass, {pg_enable_utf8 => 1, AutoCommit => 0});
 my $conncache = LWP::ConnCache->new();
 $conncache->total_capacity([1]);
 my $ua = LWP::UserAgent->new;
@@ -288,7 +292,7 @@ foreach my $realm (keys %{$realmlist}) {
 
         foreach my $charid (@{$recipeMap{$recipe}}) {
             #next if exists ($knowncrafters->{$charid});
-            $rows = $dbh->do("INSERT INTO char_recipe_$realmid (recipe_id, char_id) SELECT $recipe, $charid WHERE NOT EXISTS (SELECT * FROM char_recipe_$realmid WHERE recipe_id = $recipe AND char_id = $charid)");
+            $rows = $dbh->do("INSERT INTO char_recipe_$realmid (recipe_id, char_id) SELECT $recipe, $charid WHERE NOT EXISTS (SELECT * FROM char_recipe_$realmid WHERE recipe_id = $recipe AND char_id = $charid)") or die "that thing happened on $dbh->errstr";
             #$ins_char->execute($recipe, $charid) or die $dbh->errstr;
             $count += $rows;
         }
@@ -298,7 +302,7 @@ foreach my $realm (keys %{$realmlist}) {
 
 }
 
-
+print "ran out of things to do after $apicount requests...\n";
 
 $dbh->disconnect;
 

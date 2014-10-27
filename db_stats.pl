@@ -3,21 +3,27 @@
 use strict;
 use warnings;
 
+require "conf.pl";
+
 use Data::Dumper;
 use Time::HiRes;
 use Getopt::Long;
 use DBI;
 use Math::Round;
+use Text::Unidecode qw(unidecode);
 
-
-my $download = '';
-GetOptions('download' => \$download);
+my $names;
+GetOptions('names' => \$names);
 
 
 # constants
 
+
+our $db_login;
+our $db_pass;
+
 # set up objects
-my $dbh = DBI->connect("DBI:Pg:dbname=armory;host=localhost","armory","dicks1234", {pg_enable_utf8 => 1, AutoCommit => 0});
+my $dbh = DBI->connect("DBI:Pg:dbname=armory;host=localhost",$db_login,$db_pass, {pg_enable_utf8 => 1, AutoCommit => 0});
 binmode(STDOUT, ":utf8");
 
 
@@ -52,18 +58,19 @@ foreach my $realmid (keys $realmlist) {
 	$totalcharcount += $charcount;
 	$totalscannedcharcount += $scannedcharcount;
 
-=cut
-    my $charnames = $dbh->selectcol_arrayref("SELECT name from characters_$realmid");
-    foreach my $charname(@{$charnames}) {
-        if (exists($allcharnames{$charname})) {
-            $allcharnames{$charname}++;
-        } else {
-            $allcharnames{$charname} = 1;
-        }
-    }
-=cut
-
-	#print "$realmlist->{$realmid}->{'realm'}'s realm id is $realmid\n";
+	if ($names) {
+		my $charnames = $dbh->selectcol_arrayref("SELECT name from characters_$realmid");
+		
+		foreach my $charname(@{$charnames}) {
+			my $asciiname = unidecode($charname);
+		#print "$charname\n" if $asciiname eq "Unknown";
+			if (exists($allcharnames{$asciiname})) {
+				$allcharnames{$asciiname}++;
+			} else {
+				$allcharnames{$asciiname} = 1;
+			}
+		}
+	}
 }
 
 my $allscannedpercent = nearest(.01,($totalscannedcharcount / $totalcharcount) * 100);
@@ -72,15 +79,18 @@ print "scanned $allscannedpercent% of characters across all US realms ($totalsca
 
 
 print "total of $recipecount recipes found.\n";
+if ($names) {
 
-print "top 50 names over all US realms:\n";
 
-my $count = 0;
+	print "top 50 names over all US realms:\n";
 
-foreach my $name (sort { $allcharnames{$a} <=> $allcharnames{$b} } keys %allcharnames) {
-    print "$name\t\t$allcharnames{$name}\n";
-    $count++;
-    last if $count == 50;
+	my $count = 0;
+
+	foreach my $name (sort { $allcharnames{$b} <=> $allcharnames{$a} } keys %allcharnames) {
+	    print "$name\t\t$allcharnames{$name}\n";
+	    $count++;
+	    last if $count == 50;
+	}
 }
 
 $dbh->commit or die $dbh->errstr;
