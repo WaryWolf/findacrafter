@@ -8,10 +8,6 @@ Blizzard API documentation is [here](https://github.com/Blizzard/api-wow-docs#ch
 
 UPDATE: Blizzard has a new API and website - [dev.battle.net](http://dev.battle.net). Apparently there aren't any new features yet, but you can sign up for an API key and get a higher limit on requests per day.
 
-As of 10th September 2014, the "limit" on requests before blizzard starts giving you 503 errors is 103,000. 
-
-We are stealing character census data from [wow.realmpop.com](http://wow.realmpop.com/us.html) but any other sources of info would be good.
-
 ### FEATURES COMPLETE ###
 
 * Grab data from realmpop's json blobs and put it into database
@@ -24,14 +20,9 @@ We are stealing character census data from [wow.realmpop.com](http://wow.realmpo
 Functionality:
 
 * Need to figure out what information should be stored in the database - schema review
-* Queueing system to avoid checking same characters too often - probably based on timestamp field for each character
-* Set a per-day query limit (100k requests before we get a 503, maybe use 80k to be on the safe side)
-* web front-end for querying the DB - PHP? node.js? something secure, quick, easy to understand.
 * add argument parsing so we don't need to edit the code to change stuff
 
 Other:
-
-* Figure out how to bypass the api query limit (run the script on 2 servers, both using the 1 DB?)
 
 Secondary goals:
 
