@@ -3,7 +3,12 @@
 use strict;
 use warnings;
 
+
+use File::Basename;
+use lib dirname (__FILE__);
 require "conf.pl";
+our $db_login;
+our $db_pass;
 
 use Data::Dumper;
 use Time::HiRes;
@@ -19,8 +24,6 @@ GetOptions('names' => \$names);
 # constants
 
 
-our $db_login;
-our $db_pass;
 
 # set up objects
 my $dbh = DBI->connect("DBI:Pg:dbname=armory;host=localhost",$db_login,$db_pass, {pg_enable_utf8 => 1, AutoCommit => 0});

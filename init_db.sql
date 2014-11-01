@@ -1,4 +1,4 @@
-CREATE USER armory WITH PASSWORD 'dicks1234';
+CREATE USER exampleuser WITH PASSWORD 'examplepassword';
 CREATE DATABASE armory;
 GRANT ALL PRIVILEGES ON DATABASE armory TO armory;
 ALTER SCHEMA public OWNER TO armory;

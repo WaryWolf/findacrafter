@@ -3,6 +3,8 @@
 use strict;
 use warnings;
 
+use File::Basename;
+use lib dirname (__FILE__);
 require "conf.pl";
 our $db_login;
 our $db_pass;
@@ -168,15 +170,16 @@ foreach my $realm (keys %{$realmlist}) {
         }
         vprint "grabbing info for $name/$realm ($chariter/$charcount)\n";
         $chariter++;
-
+        
 
         my $thread = threaded_get($name,$realm,$charid);
         push(@threads,$thread);
-        #push(@threads,threaded_get($apireq_url));
+
+        $apicount++;
 
 
         $threadcount++;
-        next if $threadcount < $threadlimit;
+        next if (($threadcount < $threadlimit) and ($chariter < $charlimit));
 
         #handle threads
         vprint "waiting on threads...\n";
@@ -238,7 +241,6 @@ foreach my $realm (keys %{$realmlist}) {
                 }
             }
         }
-        $apicount += $threadlimit;
         undef %results;
     }
 

@@ -3,6 +3,12 @@
 use strict;
 use warnings;
 
+use File::Basename;
+use lib dirname (__FILE__);
+require "conf.pl";
+our $db_login;
+our $db_pass;
+
 use Data::Dumper;
 use JSON::XS;
 use HTTP::Request;
@@ -40,7 +46,7 @@ my %factions = (
 );
 
 # set up objects
-my $dbh = DBI->connect("DBI:Pg:dbname=armory;host=localhost","armory","dicks1234", {pg_enable_utf8 => 1, AutoCommit => 0});
+my $dbh = DBI->connect("DBI:Pg:dbname=armory;host=localhost",$db_login,$db_pass, {pg_enable_utf8 => 1, AutoCommit => 0});
 my $conncache = LWP::ConnCache->new();
 $conncache->total_capacity([1]);
 my $ua = LWP::UserAgent->new;
