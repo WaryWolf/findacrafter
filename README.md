@@ -1,8 +1,8 @@
 # README #
 
-This is a collection of perl scripts that will hopefully become something great one day.
+This is a collection of perl scripts that make use of wow.realmpop.com and Blizzard's WoW character API to generate a database of characters and any craftable items they can create. Once you have a populated database, you can query it to find out who can craft a particular item on your realm.
 
-### Notes ###
+### NOTES ###
 
 Blizzard API documentation is [here](https://github.com/Blizzard/api-wow-docs#character-profile-api).
 
@@ -20,7 +20,6 @@ UPDATE: Blizzard has a new API and website - [dev.battle.net](http://dev.battle.
 Functionality:
 
 * Need to figure out what information should be stored in the database - schema review
-* add argument parsing so we don't need to edit the code to change stuff
 
 Other:
 
@@ -39,7 +38,7 @@ Database speed can be improved by following this guide - [Tuning your Postgres S
 ### How do I get set up? ###
 
 * Install perl, any perl dependencies, and postgresql
-* use init_db.sql to create the database and user, and set permissions (edit the file if you want to change the DB/user name/password)
+* use init_db.sql to create the database and user, and set permissions (edit the file if you want to change the DB/user name/password, and add that user/password to conf.pl)
 * use reset_db.sql to create the necessary tables (you can also run this to clear all data from the database)
 * Run init_db.pl to grab data out of wow.realmpop.com and store it in the database
 * run api_grabber.pl to use the grabbed data to start querying the blizzard API
