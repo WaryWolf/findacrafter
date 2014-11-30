@@ -66,7 +66,7 @@ foreach my $realmid (keys $realmlist) {
 		
 		foreach my $charname(@{$charnames}) {
 			my $asciiname = unidecode($charname);
-		#print "$charname\n" if $asciiname eq "Unknown";
+		#print "$charname\n" if $asciiname eq "Death";
 			if (exists($allcharnames{$asciiname})) {
 				$allcharnames{$asciiname}++;
 			} else {
@@ -84,15 +84,20 @@ print "scanned $allscannedpercent% of characters across all US realms ($totalsca
 print "total of $recipecount recipes found.\n";
 if ($names) {
 
-
-	print "top 50 names over all US realms:\n";
+    my $top = 200;
+	print "top $top names over all US realms:\n";
 
 	my $count = 0;
+
+    foreach my $name (keys %allcharnames) {
+        delete $allcharnames{$name} if $allcharnames{$name} < 3;
+    }
+
 
 	foreach my $name (sort { $allcharnames{$b} <=> $allcharnames{$a} } keys %allcharnames) {
 	    print "$name\t\t$allcharnames{$name}\n";
 	    $count++;
-	    last if $count == 50;
+	    last if $count == $top;
 	}
 }
 
