@@ -4,9 +4,12 @@ This is a collection of perl scripts that make use of wow.realmpop.com and Blizz
 
 ### NOTES ###
 
-Blizzard API documentation is [here](https://github.com/Blizzard/api-wow-docs#character-profile-api).
+Blizzard's "legacy" API documentation is [here](https://github.com/Blizzard/api-wow-docs#character-profile-api).
 
-UPDATE: Blizzard has a new API and website - [dev.battle.net](http://dev.battle.net). Apparently there aren't any new features yet, but you can sign up for an API key and get a higher limit on requests per day.
+Blizzard has a new API and website - [dev.battle.net](http://dev.battle.net). 
+
+
+As of 2nd December 2014 this project is using the new API, which requires an API key. The old API will be removed in early 2015.
 
 ### FEATURES COMPLETE ###
 
@@ -38,15 +41,16 @@ Database speed can be improved by following this guide - [Tuning your Postgres S
 ### How do I get set up? ###
 
 * Install perl, any perl dependencies, and postgresql
+* Sign up to blizzard's API thing at [dev.battle.net](http://dev.battle.net) to get a key, and put that key into conf.pl as $api_key.
 * use init_db.sql to create the database and user, and set permissions (edit the file if you want to change the DB/user name/password, and add that user/password to conf.pl)
 * use reset_db.sql to create the necessary tables (you can also run this to clear all data from the database)
 * Run init_db.pl to grab data out of wow.realmpop.com and store it in the database
 * run api_grabber.pl to use the grabbed data to start querying the blizzard API
 
-### Dependencies ###
+### Perl Dependencies ###
 
-* LWP
 * File::Slurp
 * DBI and DBD::Pg
 * JSON and JSON::XS
-* Coro and Coro::LWP
+* AnyEvent and AnyEvent::HTTP
+* EV (although you can comment out the use EV line and AnyEvent should use its own event handler)

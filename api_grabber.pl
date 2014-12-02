@@ -8,7 +8,7 @@ use lib dirname (__FILE__);
 require "conf.pl";
 our $db_login;
 our $db_pass;
-
+our $api_key;
 use Data::Dumper;
 use JSON::XS;
 use HTTP::Request;
@@ -17,20 +17,26 @@ use Getopt::Long;
 use DBI;
 use File::Slurp;
 
-use Coro;
-use Coro::LWP;
+use AnyEvent::Loop;
+use AnyEvent;
+use AnyEvent::HTTP;
+
+
+#use Coro;
+#use Coro::LWP;
 use EV;
 use LWP;
 use LWP::ConnCache;
 
-sub threaded_get ($$$);
+#sub threaded_get ($$$);
+sub anyevent_get ($$$$);
 sub vprint ($);
 
 my $proxy;
 my $verbose;
-my $checkachieves;
+my $checkachieves = '';
 my $charlimit = 100;
-my $threadlimit = 20;
+my $threadlimit = 10;
 
 GetOptions( 'verbose'           => \$verbose,
             'checkachieves'     => \$checkachieves,
@@ -39,8 +45,12 @@ GetOptions( 'verbose'           => \$verbose,
 	        'threads=i'         => \$threadlimit
 );
 
+my $sleeptime = $threadlimit / 10;
+
 # constants
-my $url = 'http://us.battle.net/api/wow/character';
+#my $url = 'http://us.battle.net/api/wow/character';
+my $url = 'https://us.api.battle.net/wow/character';
+
 my $path = "json/";
 
 my %factions = (
@@ -114,6 +124,7 @@ $ua->conn_cache($conncache);
 binmode(STDOUT, ":utf8");
 
 my %results;
+my $anyeventres;
 my $apicount = 0;;
 my $twomonthsago = time() - 4838400;
 
@@ -124,7 +135,9 @@ my $realmcount = scalar keys $realmlist;
 my $realmno = 0;
 
 
-async { EV::loop };
+#async { EV::loop };
+#AnyEvent::Loop::run;
+
 
 foreach my $realm (keys %{$realmlist}) {
 
@@ -156,57 +169,66 @@ foreach my $realm (keys %{$realmlist}) {
 
 
     my %recipeMap;
-    my $chariter = 1;
+    my $chariter = 0;
     my %timestamps;
     my @oldchars;
     my @noncrafters;
     my $profcount;
     my $threadcount = 0;
     my @threads;
+    my $cv;
     while (my ($name, $charid) = $charlist->fetchrow_array) {
 
-        if ($apicount > 90000) {
-            die "hit requestlimit. will continue later.\n";
+        if ($chariter % $threadlimit == 0) {
+            $cv = AnyEvent->condvar( cb => sub { vprint "threads done\n"; });
+            $cv->begin(sub { shift->send(\%results) });
         }
-        vprint "grabbing info for $name/$realm ($chariter/$charcount)\n";
-        $chariter++;
-        
 
-        my $thread = threaded_get($name,$realm,$charid);
-        push(@threads,$thread);
+#        if ($apicount > 90000) {
+#            die "hit requestlimit. will continue later.\n";
+#        }
+        $chariter++;
+        vprint "grabbing info for $name/$realm ($chariter/$charcount)\n";
+        anyevent_get($name, $realm, $charid, $cv);
 
         $apicount++;
-
 
         $threadcount++;
         next if (($threadcount < $threadlimit) and ($chariter < $charlimit));
 
+
+        vprint "sleeping for a bit...\n";
+        #sleep $sleeptime;
+        my $wait = AnyEvent->timer(
+            after => 1,
+            cb => sub { $cv->send }
+        );
+        
         #handle threads
         vprint "waiting on threads...\n";
 
-        foreach my $thread (@threads) {
-            $thread->join;
-        }
-        @threads = ();
         $threadcount = 0;
 
-
+        $cv->end;
+        my $foo = $cv->recv;
+        undef($cv);
+        
         foreach my $charid (keys %results) {
             my $chardata = $results{$charid}{'content'};
             my $name = $results{$charid}{'name'};
+            my $code = $results{$charid}{'code'};
             my $realm = $results{$charid}{'realm'};
-
-            if ($chardata->code == 503) {
+            if ($code == '503') {
                 die "Blizzard got mad at us after $apicount requests...\n";
             }
 
-            if ((length($chardata->content) < 5) or ($chardata->code != 200)) {
+            if ((length($chardata) < 5) or ($code != '200')) {
                 push(@oldchars,$charid);
                 next;
             }
 
-            my $apijson = decode_json($chardata->content)
-		or die "malformed json: $chardata->content\n";
+            my $apijson = decode_json($chardata)
+		or die "malformed json: $chardata\n";
             print "$name is still bad\n" if exists($apijson->{"status"});
             $profcount = 0;
             foreach my $prof ($apijson->{'professions'}->{'primary'}) {
@@ -311,7 +333,44 @@ $dbh->disconnect;
 # PROGRAM ENDS HERE, FUNCTIONS BELOW
 
 
+sub anyevent_get ($$$$) {
 
+    my $name = shift;
+    my $realm = shift;
+    my $charid = shift;
+    my $cv = shift;
+    my $fullurl;
+    if ($checkachieves) {
+        $fullurl = "$url/$realm/$name?fields=professions,feed,achievements&apikey=$api_key";
+    } else {
+        $fullurl = "$url/$realm/$name?fields=professions,feed&apikey=$api_key";
+    }
+    $cv->begin;
+
+    my $request;  
+    $request = http_request(
+      GET => $fullurl, 
+      timeout => 2, # seconds
+      sub {
+        my ($body, $hdr) = @_;
+		if ($hdr->{Status} =~ /^2/) {
+            #print "got a url correctly!\n";
+			$results{$charid}{'content'} = $body;
+            $results{$charid}{'code'} = $hdr->{Status};
+			$results{$charid}{'realm'} = $realm;
+			$results{$charid}{'name'} = $name;
+        } else {
+		#print "Error for $fullurl, $hdr->{Status}, $hdr->{Reason}\n";
+		}
+        undef $request;
+        $cv->end;
+      }
+   ); 
+
+}
+
+
+=for comment
 sub threaded_get ($$$) {
     #my ($url) = @_;
     my $name = shift;
@@ -336,7 +395,7 @@ sub threaded_get ($$$) {
         $results{$charid}{'name'} = $name;
     }
 }
-
+=cut
 
 sub update_flag {
     my ($flag, $realmid, @chars) = @_;
