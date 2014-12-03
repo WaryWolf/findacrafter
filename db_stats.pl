@@ -22,7 +22,7 @@ GetOptions('names' => \$names);
 
 
 # constants
-
+my $twomonthsago = time() - 4838400;
 
 
 # set up objects
@@ -51,7 +51,7 @@ foreach my $realmid (keys $realmlist) {
 	my $res = $dbh->selectcol_arrayref("SELECT COUNT(*) FROM characters_$realmid");
 	my $charcount = $res->[0];
 
-	$res = $dbh->selectcol_arrayref("SELECT COUNT(*) FROM characters_$realmid WHERE last_checked > 0");
+	$res = $dbh->selectcol_arrayref("SELECT COUNT(*) FROM characters_$realmid WHERE last_checked > $twomonthsago");
 	my $scannedcharcount = $res->[0];
 
 	my $scannedpercent = nearest(.01,($scannedcharcount / $charcount) * 100);

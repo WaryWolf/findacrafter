@@ -9,6 +9,7 @@ require "conf.pl";
 our $db_login;
 our $db_pass;
 our $api_key;
+
 use Data::Dumper;
 use JSON::XS;
 use HTTP::Request;
@@ -22,13 +23,13 @@ use AnyEvent;
 use AnyEvent::HTTP;
 
 
-#use Coro;
-#use Coro::LWP;
 use EV;
 use LWP;
 use LWP::ConnCache;
 
 #sub threaded_get ($$$);
+
+sub parse_results ($$$$);
 sub anyevent_get ($$$$);
 sub vprint ($);
 
@@ -81,6 +82,8 @@ my @craftingprofs = (
         'Tailoring',
 );
 
+
+
 my %cma = (
         6884    => 1,
         6885    => 1,
@@ -124,7 +127,6 @@ $ua->conn_cache($conncache);
 binmode(STDOUT, ":utf8");
 
 my %results;
-my $anyeventres;
 my $apicount = 0;;
 my $twomonthsago = time() - 4838400;
 
@@ -135,8 +137,6 @@ my $realmcount = scalar keys $realmlist;
 my $realmno = 0;
 
 
-#async { EV::loop };
-#AnyEvent::Loop::run;
 
 
 foreach my $realm (keys %{$realmlist}) {
@@ -150,30 +150,22 @@ foreach my $realm (keys %{$realmlist}) {
     my $sql = "SELECT char_id FROM characters_$realmid";
     my $charcount = $dbh->do($sql) or die $dbh->errstr;
 
-    vprint "looking at $charlimit of $charcount chars on '$realm' ($realmno/$realmcount)\n";
+    print "looking at $charlimit of $charcount chars on '$realm' ($realmno/$realmcount)\n";
 
     my $charlist = $dbh->prepare(
         "SELECT name, char_id 
         FROM characters_$realmid
         WHERE last_checked < '$twomonthsago'
         LIMIT $charlimit");
-#        ");
-    #my $charlist = $dbh->prepare("SELECT name, char_id FROM characters_$realmid");
 
     $charlist->execute or die $dbh->errstr;
     die $charlist->errstr if ($charlist->err);
-
-
-    #my $charrecipeknown = $dbh->selectall_arrayref("SELECT recipe_id FROM char_recipe_$realmid");
-    #my $charrecipeknown = $dbh->selectcol_arrayref("SELECT recipe_id FROM char_recipe_$realmid");
-
 
     my %recipeMap;
     my $chariter = 0;
     my %timestamps;
     my @oldchars;
     my @noncrafters;
-    my $profcount;
     my $threadcount = 0;
     my @threads;
     my $cv;
@@ -184,9 +176,6 @@ foreach my $realm (keys %{$realmlist}) {
             $cv->begin(sub { shift->send(\%results) });
         }
 
-#        if ($apicount > 90000) {
-#            die "hit requestlimit. will continue later.\n";
-#        }
         $chariter++;
         vprint "grabbing info for $name/$realm ($chariter/$charcount)\n";
         anyevent_get($name, $realm, $charid, $cv);
@@ -198,7 +187,6 @@ foreach my $realm (keys %{$realmlist}) {
 
 
         vprint "sleeping for a bit...\n";
-        #sleep $sleeptime;
         my $wait = AnyEvent->timer(
             after => 1,
             cb => sub { $cv->send }
@@ -212,63 +200,20 @@ foreach my $realm (keys %{$realmlist}) {
         $cv->end;
         my $foo = $cv->recv;
         undef($cv);
+
         
-        foreach my $charid (keys %results) {
-            my $chardata = $results{$charid}{'content'};
-            my $name = $results{$charid}{'name'};
-            my $code = $results{$charid}{'code'};
-            my $realm = $results{$charid}{'realm'};
-            if ($code == '503') {
-                die "Blizzard got mad at us after $apicount requests...\n";
-            }
-
-            if ((length($chardata) < 5) or ($code != '200')) {
-                push(@oldchars,$charid);
-                next;
-            }
-
-            my $apijson = decode_json($chardata)
-		or die "malformed json: $chardata\n";
-            print "$name is still bad\n" if exists($apijson->{"status"});
-            $profcount = 0;
-            foreach my $prof ($apijson->{'professions'}->{'primary'}) {
-                next if !exists($prof->[0]->{'name'});
-                my $profName = $prof->[0]->{'name'};
-                if (grep(/^$profName$/,@craftingprofs)) {
-                    $profcount++;
-                    foreach my $recipe (@{$prof->[0]->{'recipes'}}) {
-                        if (exists($recipeMap{$recipe})) {
-                            push(@{$recipeMap{$recipe}}, $charid);
-                        } else {
-                         $recipeMap{$recipe} = [ $charid ];
-                        }
-                    }
-                }
-            }
-            if ($profcount == 0) {
-                push(@noncrafters, $charid);
-            }
-            next if !exists($apijson->{'feed'});
-            $timestamps{$charid} = substr($apijson->{'feed'}->[0]->{'timestamp'}, 0, 10);
-            if ($checkachieves) {
-                my %cmlist;
-                foreach my $ach (@{$apijson->{'achievements'}->{'achievementsCompleted'}}) {
-                    next if !exists($cma{$ach});
-                    $cmlist{$ach} = 1;
-                }
-                foreach my $ach (keys %cmlist) {
-                    next if !exists($cmamap{$ach});
-                    my $achbronze = $cmamap{$ach};
-                    print "$name-$realm is a LOSER, they have $ach but not $achbronze!\n" if !exists($cmlist{$achbronze});
-                }
-            }
-        }
+        parse_results(\%recipeMap, \@noncrafters, \@oldchars, \%timestamps);
+        
         undef %results;
     }
 
     # clean up threads
-    foreach my $thread (@threads) {
-        $thread->join;
+    if ((defined($cv)) and ($cv->ready)) {
+        print "cleaning up last few chars from server...\n";
+        my $foo = $cv->recv;
+        parse_results(\%recipeMap, \@noncrafters, \@oldchars, \%timestamps);
+        undef %results;
+        $threadcount = 0;
     }
 
 
@@ -306,18 +251,12 @@ foreach my $realm (keys %{$realmlist}) {
 
 
     # populate char_recipes table
-    #my $ins_char = $dbh->prepare("INSERT INTO char_recipe_$realmid (recipe_id, char_id) VALUES (?, ?)");
     my $rows;
     foreach my $recipe (keys %recipeMap) {
 
-        # get a list of all currently known crafters of this recipe
-        # so we don't insert something that already exists
-        #my $knowncrafters = $dbh->selectall_hashref("SELECT char_id FROM char_recipe_$realmid WHERE recipe_id = $recipe", "char_id");
 
         foreach my $charid (@{$recipeMap{$recipe}}) {
-            #next if exists ($knowncrafters->{$charid});
-            $rows = $dbh->do("INSERT INTO char_recipe_$realmid (recipe_id, char_id) SELECT $recipe, $charid WHERE NOT EXISTS (SELECT * FROM char_recipe_$realmid WHERE recipe_id = $recipe AND char_id = $charid)") or die "that thing happened on $dbh->errstr";
-            #$ins_char->execute($recipe, $charid) or die $dbh->errstr;
+            $rows = $dbh->do("INSERT INTO char_recipe_$realmid (recipe_id, char_id) SELECT $recipe, $charid WHERE NOT EXISTS (SELECT * FROM char_recipe_$realmid WHERE recipe_id = $recipe AND char_id = $charid)") or die "that thing happened on ", $dbh->errstr;
             $count += $rows;
         }
     }
@@ -396,6 +335,68 @@ sub threaded_get ($$$) {
     }
 }
 =cut
+
+sub parse_results ($$$$) {
+
+    my $recipeMap = shift;
+    my $noncrafters = shift;
+    my $oldchars = shift;
+    my $timestamps = shift;
+
+    
+    foreach my $charid (keys %results) {
+        my $chardata = $results{$charid}{'content'};
+        my $name = $results{$charid}{'name'};
+        my $code = $results{$charid}{'code'};
+        my $realm = $results{$charid}{'realm'};
+        if ($code == '503') {
+            die "Blizzard got mad at us after $apicount requests...\n";
+        }
+
+        if ((length($chardata) < 5) or ($code != '200')) {
+            push(@{$oldchars},$charid);
+            next;
+        }
+
+        my $apijson = decode_json($chardata) or die "malformed json: $chardata\n";
+
+        print "$name is still bad\n" if exists($apijson->{"status"});
+        my $profcount = 0;
+        foreach my $prof ($apijson->{'professions'}->{'primary'}) {
+            next if !exists($prof->[0]->{'name'});
+            my $profName = $prof->[0]->{'name'};
+            if (grep(/^$profName$/,@craftingprofs)) {
+                $profcount++;
+                foreach my $recipe (@{$prof->[0]->{'recipes'}}) {
+                    if (exists(${$recipeMap}{$recipe})) {
+                        push(@{$recipeMap->{$recipe}}, $charid);
+                    } else {
+                     $recipeMap->{$recipe} = [ $charid ];
+                    }
+                }
+            }
+        }
+        if ($profcount == 0) {
+            push(@{$noncrafters}, $charid);
+        }
+        next if !exists($apijson->{'feed'});
+        ${$timestamps}{$charid} = substr($apijson->{'feed'}->[0]->{'timestamp'}, 0, 10);
+        if ($checkachieves) {
+            my %cmlist;
+            foreach my $ach (@{$apijson->{'achievements'}->{'achievementsCompleted'}}) {
+                next if !exists($cma{$ach});
+                $cmlist{$ach} = 1;
+            }
+            foreach my $ach (keys %cmlist) {
+                next if !exists($cmamap{$ach});
+                my $achbronze = $cmamap{$ach};
+                print "$name-$realm is a LOSER, they have $ach but not $achbronze!\n" if !exists($cmlist{$achbronze});
+            }
+        }
+    }
+
+}
+
 
 sub update_flag {
     my ($flag, $realmid, @chars) = @_;
